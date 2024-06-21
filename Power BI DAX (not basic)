@@ -1,0 +1,14 @@
+rank 
+
+Rank = RANKX(ALLSELECTED([哪个table]),[哪一列],,DESC,DENSE);
+
+/**for example**/
+/*****----------Rank total sales---------****/
+Rank Total Sales = RANKX(ALLSELECTED('Product Dim'),[Total Sales],,DESC,Dense)
+/*****----------Rank total tranx---------****/
+Tx Rank = RANKX(ALLSELECTED('Product Dim'),[Total Transactions],,DESC,Dense)
+
+Top of the business, top of a thing (need to sort out rank first, then use top rank value =1)
+                                                                          \
+                                                                           \
+Top Earner = CALCULATE(min('Product Dim'[product_detail]),FILTER('Product Dim',[Rank Total Sales]=1))
