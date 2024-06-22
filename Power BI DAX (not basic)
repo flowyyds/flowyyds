@@ -12,3 +12,13 @@ Top of the business, top of a thing (need to sort out rank first, then use top r
                                                                           \
                                                                            \
 Top Earner = CALCULATE(min('Product Dim'[product_detail]),FILTER('Product Dim',[Rank Total Sales]=1))
+
+
+
+//*******************************switch & if************************************//
+
+
+
+Time of Day = IF(SUM(Kraken_Koffee_Facts[Hour.1])<12, "Morning",
+                SUM(Kraken_Koffee_Facts[Hour.1]) < 18,"Afternoon",
+                "evening")
