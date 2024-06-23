@@ -22,3 +22,20 @@ Top Earner = CALCULATE(min('Product Dim'[product_detail]),FILTER('Product Dim',[
 Time of Day = IF(SUM(Kraken_Koffee_Facts[Hour.1])<12, "Morning",
                 SUM(Kraken_Koffee_Facts[Hour.1]) < 18,"Afternoon",
                 "evening")
+
+
+
+DAX ---- what is DAX
+
+DAX not just for measure,but also can create tables 
+
+Forecast Date Table = CALENDAR(DATE(2023,01,01),DATE(2023,12,31))
+
+
+
+
+
+now
+forcasting very fucking important for financial prediction
+
+averagex
