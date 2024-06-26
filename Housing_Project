@@ -1,0 +1,4 @@
+
+
+remove number value from description_dimension
+= Table.SelectRows(#"Added Custom", each ([Custom] = false))
