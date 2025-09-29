@@ -1,0 +1,921 @@
+----------用户复购周期，
+
+
+---------一单/复购时间纬度对比，
+
+-----------多单用户BC纬度对比，
+
+WITH repurchase_users AS (
+    -- 统计时间内有复购（≥2单）的分销商用户
+    SELECT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND cn_pay_sucs_date >= '2024-08-01'
+      AND cn_pay_sucs_date < '2025-08-01'
+    --  AND CASE WHEN is_pro_ord = '1' AND current_level IN ('2','3') THEN 1 ELSE 0 END = 1
+     AND CASE WHEN is_pro_ord = '0' AND current_level IN ('1','2','3') THEN 1 ELSE 0 END = 1
+    GROUP BY user_id
+    HAVING COUNT(*) >= 2
+)
+SELECT
+    detail.dcate_lv1_name_en AS 一级类目,
+    detail.dcate_lv2_name_en AS 二级类目,
+    detail.dcate_lv3_name_en AS 三级类目,
+    detail.spu_name_cn       AS SPU名称,
+    COUNT(DISTINCT detail.user_id) AS 复购用户数,
+    COUNT(*) AS 总订单数,
+    SUM(detail.ord_gmv_cny_amt2) AS 订单金额,
+    ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT detail.user_id), 2) AS 人均订单数
+FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df detail
+JOIN repurchase_users ru
+  ON detail.user_id = ru.user_id
+WHERE detail.ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+  AND detail.cn_pay_sucs_date >= '2024-08-01'
+  AND detail.cn_pay_sucs_date < '2025-09-01'
+ -- AND CASE WHEN detail.is_pro_ord = '1' AND detail.current_level IN ('2','3') THEN 1 ELSE 0 END = 1
+ AND CASE WHEN is_pro_ord = '0' AND current_level IN ('1','2','3') THEN 1 ELSE 0 END = 1
+GROUP BY detail.dcate_lv1_name_en,
+         detail.dcate_lv2_name_en,
+         detail.dcate_lv3_name_en,
+         detail.spu_name_cn
+ORDER BY 复购用户数 DESC, 总订单数 DESC;
+
+
+
+
+
+
+
+WITH distributor_users AS (
+    -- 分销商用户池
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+monthly_orders AS (
+    
+    SELECT 
+        user_id,
+       -- SUBSTR(cn_pay_sucs_date, 1, 7) AS order_month,
+        COUNT(*) AS order_count,
+        SUM(ord_gmv_cny_amt2) AS total_gmv
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND cn_pay_sucs_date >= '2024-08-01'
+      AND cn_pay_sucs_date < '2025-01-01'
+      
+       AND user_id IN (SELECT user_id FROM distributor_users) ------------c端
+    GROUP BY user_id
+    HAVING COUNT(*) >= 2
+)
+
+SELECT 
+   -- t.order_month,
+    t.dcate_lv1_name_en AS 一级类目,
+    t.dcate_lv2_name_en AS 二级类目,
+    t.dcate_lv3_name_en AS 三级类目,
+    t.spu_name_cn       AS SPU名称,
+    COUNT(DISTINCT t.user_id) AS 复购用户数,
+    COUNT(*) AS 总订单数,
+    SUM(t.ord_gmv_cny_amt2) AS 订单金额,
+    ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT t.user_id), 2) AS 人均订单数
+FROM (
+    SELECT 
+        detail.user_id,
+      --  SUBSTR(detail.cn_pay_sucs_date, 1, 7) AS order_month,
+        detail.ord_gmv_cny_amt2,
+        detail.spu_name_cn,
+        detail.dcate_lv1_name_en,
+        detail.dcate_lv2_name_en,
+        detail.dcate_lv3_name_en,
+        ROW_NUMBER() OVER (
+            PARTITION BY detail.user_id
+            ORDER BY detail.cn_pay_sucs_date
+        ) AS order_rank
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df detail
+    INNER JOIN monthly_orders mo 
+        ON detail.user_id = mo.user_id 
+     --  AND SUBSTR(detail.cn_pay_sucs_date, 1, 7) = mo.order_month
+    WHERE detail.ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+) t
+WHERE t.order_rank <= 2
+GROUP BY t.dcate_lv1_name_en, t.dcate_lv2_name_en, t.dcate_lv3_name_en, t.spu_name_cn
+ORDER BY 复购用户数 DESC, 总订单数 DESC;
+
+
+
+
+
+
+
+
+
+
+
+
+-- --------------------c
+-- WITH distributor_users AS (
+--     -- 分销商用户池
+--     SELECT DISTINCT user_id
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND is_pro_ord = '1'
+--       AND current_level IN ('2', '3')
+-- ),
+
+-- user_orders AS (
+--     -- 所有 C端用户订单（排除分销商）
+--     SELECT 
+--         user_id,
+--         cn_pay_sucs_date,
+--         ord_gmv_cny_amt2,
+--         spu_name_cn,
+--         dcate_lv1_name_en,
+--         dcate_lv2_name_en,
+--         dcate_lv3_name_en
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND cn_pay_sucs_date >= '2024-08-01'
+--       AND cn_pay_sucs_date <  '2025-09-01'
+--       AND user_id NOT IN (SELECT user_id FROM distributor_users)
+-- ),
+
+-- repurchase_users AS (
+--     -- 计算每个用户的订单，找到 96 天内 ≥2 单的用户
+--     SELECT DISTINCT o1.user_id
+--     FROM user_orders o1
+--     JOIN user_orders o2
+--       ON o1.user_id = o2.user_id
+--      AND o2.cn_pay_sucs_date > o1.cn_pay_sucs_date
+--      AND o2.cn_pay_sucs_date <= DATEADD(o1.cn_pay_sucs_date, 96, 'day')  -- 96天内
+-- )
+
+-- SELECT 
+--     SUBSTR(u.cn_pay_sucs_date, 1, 7) AS order_month,
+--    -- u.dcate_lv1_name_en AS 一级类目,
+--    -- u.dcate_lv2_name_en AS 二级类目,
+--    -- u.dcate_lv3_name_en AS 三级类目,
+--     u.spu_name_cn       AS SPU名称,
+--     COUNT(DISTINCT u.user_id) AS 复购用户数
+--    -- COUNT(*) AS 总订单数,
+--    -- SUM(u.ord_gmv_cny_amt2) AS 订单金额,
+--    -- ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT u.user_id), 2) AS 人均订单数
+-- FROM user_orders u
+-- JOIN repurchase_users r
+--   ON u.user_id = r.user_id
+-- GROUP BY SUBSTR(u.cn_pay_sucs_date, 1, 7),
+--          --u.dcate_lv1_name_en
+--           u.spu_name_cn
+--        --  u.dcate_lv2_name_en, u.dcate_lv3_name_en
+-- ORDER BY 复购用户数 DESC
+
+
+
+-- ----------cspu
+-- WITH distributor_users AS (
+--     -- 分销商用户池
+--     SELECT DISTINCT user_id
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND is_pro_ord = '1'
+--       AND current_level IN ('2', '3')
+-- ),
+
+-- user_orders AS (
+--     -- C端用户订单（排除分销商）
+--     SELECT 
+--         user_id,
+--         cn_pay_sucs_date,
+--         spu_name_cn
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND cn_pay_sucs_date >= '2024-08-01'
+--       AND cn_pay_sucs_date <  '2025-09-01'
+--       AND user_id NOT IN (SELECT user_id FROM distributor_users)
+-- ),
+
+-- repurchase_users AS (
+--     -- 96天内 ≥2 单的用户
+--     SELECT DISTINCT o1.user_id
+--     FROM user_orders o1
+--     JOIN user_orders o2
+--       ON o1.user_id = o2.user_id
+--      AND o2.cn_pay_sucs_date > o1.cn_pay_sucs_date
+--      AND o2.cn_pay_sucs_date <= DATEADD(o1.cn_pay_sucs_date, 96, 'day')
+-- ),
+
+-- spu_stats AS (
+--     SELECT 
+--         SUBSTR(u.cn_pay_sucs_date, 1, 7) AS order_month,
+--         u.spu_name_cn AS SPU名称,
+--         COUNT(DISTINCT u.user_id) AS 复购用户数
+--     FROM user_orders u
+--     JOIN repurchase_users r
+--       ON u.user_id = r.user_id
+--     GROUP BY SUBSTR(u.cn_pay_sucs_date, 1, 7), u.spu_name_cn
+-- ),
+
+-- ranked_spu AS (
+--     SELECT 
+--         s.*,
+--         ROW_NUMBER() OVER (PARTITION BY s.order_month ORDER BY s.复购用户数 DESC) AS spu_rank
+--     FROM spu_stats s
+-- )
+
+-- SELECT 
+--     order_month,
+--     SPU名称,
+--     复购用户数
+-- FROM ranked_spu
+-- WHERE spu_rank <= 50
+-- ORDER BY order_month, spu_rank;
+
+
+--------------------BC纬度下商品季节属性对比，商品同频跨品复购对比
+--------------【B】
+----------1. 计算出哪个类目最有潜力：1-2单成单最多的spu---- spu_name_cn 和一级类目cate_lv2_name_cn
+----------有一个问题，我需要剔除分销商用户。 分销商用户定义 select *  FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df') and AND is_pro_ord = '1' and current_level in('2','3')
+WITH distributor_users AS (
+    -- 先识别出分销商用户
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+    AND is_pro_ord = '1'
+    AND current_level IN ('2', '3')
+),
+
+monthly_orders AS (
+    -- 筛选非分销商用户中月订单≥2的用户
+    SELECT 
+        user_id,
+        SUBSTR(cn_pay_sucs_date, 1, 7) as order_month,
+        COUNT(*) as order_count,
+        sum(ord_gmv_cny_amt2)
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+    AND cn_pay_sucs_date >= '2024-08-01'
+    AND cn_pay_sucs_date < '2025-09-01'
+   -- AND user_id NOT IN (SELECT user_id FROM distributor_users)    -- 剔除分销商用户全部的user_id not in 
+    AND user_id IN (SELECT user_id FROM distributor_users) ------只看分销商
+    GROUP BY user_id, SUBSTR(cn_pay_sucs_date, 1, 7)
+    HAVING COUNT(*) >= 2  -- 只考虑在同月有>=2单的用户
+)
+
+SELECT SUBSTR(cn_pay_sucs_date, 1, 7),
+dcate_lv1_name_en as 一级类目,
+       dcate_lv2_name_en as 二级类目,
+      dcate_lv3_name_en as 三级类目,
+    -- cate_lv2_name_cn as 二级类目,
+    spu_name_cn as SPU名称,
+    COUNT(DISTINCT t.user_id) as 复购用户数,
+    COUNT(*) as 总订单数,
+    sum(ord_gmv_cny_amt2) as 订单金额,
+    ROUND(COUNT(*) * 1.0 / COUNT(DISTINCT t.user_id), 2) as 人均订单数
+FROM (
+    SELECT 
+   
+        detail.user_id,
+        detail.spu_name_cn,
+        detail.dcate_lv1_name_en,
+        detail.dcate_lv2_name_en,
+        detail.dcate_lv3_name_en,
+      --  detail.cate_lv2_name_cn,
+        ROW_NUMBER() OVER (
+            PARTITION BY detail.user_id, SUBSTR(detail.cn_pay_sucs_date, 1, 7) 
+            ORDER BY detail.cn_pay_sucs_date
+        ) AS order_rank
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df detail
+    INNER JOIN monthly_orders mo 
+        ON detail.user_id = mo.user_id 
+        AND SUBSTR(detail.cn_pay_sucs_date, 1, 7) = mo.order_month
+    WHERE detail.ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+  --  AND detail.user_id not IN (SELECT user_id FROM distributor_users) -- 再次确保排除分销商
+    and detail.user_id IN (SELECT user_id FROM distributor_users) -- 再次确保排除分销商
+) t
+WHERE order_rank <= 2  -- 只取每个用户每月的第1-2单
+GROUP BY dcate_lv1_name_en, dcate_lv2_name_en, dcate_lv3_name_en,spu_name_cn,SUBSTR(cn_pay_sucs_date, 1, 7)
+ORDER BY 复购用户数 DESC, 总订单数 DESC;
+
+
+-------------【c】
+
+-- 以下单时间为起点，往后30天，他在哪一天回来, 购买完1单后，平均每个人总共浏览了多少次， 平均每次浏览多长时间 session length 
+----25年每个月 下单次数大于等于2单的用户，第一次下单后到第二次下单中间，访问了什么一级类目 二级类目 三级类目
+-- ---------浏览最多的商品（Sku top10）
+
+WITH distributor_users AS (
+    -- 先识别出分销商用户
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+    AND is_pro_ord = '1'
+    AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,  -- 用 datetime
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) as rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) as monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+    HAVING MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) IS NOT NULL
+       AND MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) IS NOT NULL
+),
+
+
+raw_page_views AS (
+    -- 使用新的sku浏览表，直接获取sku_code
+    SELECT 
+        usr_id AS user_id,
+        sku_code,
+        session_id,
+        log_view_cn_time AS view_time
+    FROM ssvvcdm.dwd_vevor_log_sku_view_di
+    WHERE ds BETWEEN '20240501' AND '20250831'
+      AND usr_id IS NOT NULL
+      AND sku_code IS NOT NULL
+),
+
+
+sku_map AS (
+    -- sku_code → 一级/二级/三级类目映射
+    SELECT DISTINCT 
+        sku_code,
+        dcate_lv1_name_en,
+        dcate_lv2_name_en,
+        dcate_lv3_name_en
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND sku_code IS NOT NULL
+),
+
+
+browse_between_orders AS (
+    -- 在首单和次单之间的浏览
+    SELECT
+        u.user_id,
+        u.order_month,
+        r.view_time,
+        r.sku_code,
+        sp.dcate_lv1_name_en,
+        sp.dcate_lv2_name_en,
+        sp.dcate_lv3_name_en
+    FROM first_second_order u
+    INNER JOIN raw_page_views r ON u.user_id = r.user_id
+   LEFT JOIN sku_map sp  ON r.sku_code = sp.sku_code
+    WHERE r.view_time > u.first_order_time
+      AND r.view_time < u.second_order_time
+)
+---------------统计被浏览的 SPU
+SELECT
+   -- order_month,
+    COALESCE(dcate_lv1_name_en, '未知一级类目') AS cate_lv1,
+    COALESCE(dcate_lv2_name_en, '未知二级类目') AS cate_lv2,
+    COALESCE(dcate_lv3_name_en, '未知三级类目') AS cate_lv3,
+    COUNT(DISTINCT user_id) AS browse_users,
+    COUNT(*) AS browse_pv
+FROM browse_between_orders
+GROUP BY 
+   -- order_month,
+    COALESCE(dcate_lv1_name_en, '未知一级类目'),
+    COALESCE(dcate_lv2_name_en, '未知二级类目'),
+    COALESCE(dcate_lv3_name_en, '未知三级类目')
+ORDER BY  browse_users DESC, browse_pv DESC;
+--ORDER BY cate_lv1, cate_lv2, cate_lv3, browse_users DESC;
+
+
+---------------------------------
+---------浏览最多的商品（Sku top10）
+--  cate_sku_stats AS (
+--     SELECT
+--        -- order_month,
+--         COALESCE(dcate_lv1_name_en, '未知一级类目') AS cate_lv1,
+--         COALESCE(dcate_lv2_name_en, '未知二级类目') AS cate_lv2,
+--         COALESCE(dcate_lv3_name_en, '未知三级类目') AS cate_lv3,
+--         sku_code,
+--         COUNT(DISTINCT user_id) AS browse_users,
+--         COUNT(*) AS browse_pv
+--     FROM browse_between_orders
+--     GROUP BY 
+--        -- order_month,
+--         COALESCE(dcate_lv1_name_en, '未知一级类目'),
+--         COALESCE(dcate_lv2_name_en, '未知二级类目'),
+--         COALESCE(dcate_lv3_name_en, '未知三级类目'),
+--         sku_code
+-- ),
+
+-- ranked_sku AS (
+--     SELECT
+--         *,
+--         ROW_NUMBER() OVER (
+--             PARTITION BY cate_lv1, cate_lv2, cate_lv3 
+--             ORDER BY browse_pv DESC, browse_users DESC
+--         ) AS rn
+--     FROM cate_sku_stats
+-- )
+
+-- SELECT
+--     --order_month,
+--     cate_lv1,
+--     cate_lv2,
+--     cate_lv3,
+--     sku_code,
+--     browse_users,
+--     browse_pv
+-- FROM ranked_sku
+-- WHERE rn <= 10
+-- ORDER BY  cate_lv1, cate_lv2, cate_lv3, rn
+
+
+
+----------以下单时间为起点，往后30天，他在哪一天回来, 购买完1单后，平均每个人总共浏览了多少次， 平均每次浏览多长时间 session length 
+------ 看复购用户第一单到第二单到中间，第一个落地页是什么（一般浏览路径）商详浏览时间长度（平均），平均会话停留时间
+
+WITH distributor_users AS (
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+),
+
+raw_page_views AS (
+    SELECT 
+        usr_id AS user_id,
+        sku_code,
+        session_id,
+        log_view_cn_time AS view_time
+    FROM ssvvcdm.dwd_vevor_log_sku_view_di
+    WHERE ds BETWEEN '20240501' AND '20250831'
+      AND usr_id IS NOT NULL
+      AND sku_code IS NOT NULL
+),
+
+landing_page_type AS (
+    SELECT 
+        session_id,          
+        usr_id AS user_id,
+        landing_page_type,   -- 着陆页类型
+        lst_page_type,       -- 退出页类型
+        duration_time,       -- 会话停留时间（秒）
+        pbd_duration_time    -- 商详停留时间（秒）
+    FROM ssvvcdm.dwd_vevor_log_session_di
+    WHERE ds BETWEEN '20240501' AND '20250831'
+      AND usr_id IS NOT NULL
+      and landing_page_type not in ( '\N','Undefine page type: class com.vevor.app.region.country.CountryListFragment','Undefine page type: class com.vevor.app.region.RegionSelectFragment','Undefine page type: SiteSettingViewController')
+),
+
+-- 把会话和首单次单之间的浏览行为连起来
+session_between_orders AS (
+    SELECT
+        u.user_id,
+        u.order_month,
+        s.session_id,
+        s.landing_page_type,
+        s.lst_page_type,
+        s.duration_time,
+        s.pbd_duration_time,
+        MIN(r.view_time) AS first_view_time   -- 会话中第一个商详浏览时间
+    FROM first_second_order u
+    INNER JOIN raw_page_views r 
+        ON u.user_id = r.user_id
+       AND r.view_time > DATEADD(u.first_order_time, 1, 'dd')   -- 剔除首单后的 24 小时
+       AND r.view_time < u.second_order_time
+    INNER JOIN landing_page_type s
+        ON r.session_id = s.session_id
+       AND r.user_id = s.user_id
+    GROUP BY u.user_id, u.order_month, s.session_id, 
+             s.landing_page_type, s.lst_page_type, s.duration_time, s.pbd_duration_time
+)
+
+-- 统计结果
+SELECT
+    order_month,
+    landing_page_type,
+    COUNT(DISTINCT user_id) AS user_cnt,
+    COUNT(DISTINCT session_id) AS session_cnt,
+    ROUND(AVG(pbd_duration_time)/60, 2) AS avg_pbd_duration_time,  -- 平均商详浏览时长（秒）
+    ROUND(AVG(duration_time)/60, 2) AS avg_session_duration_time  -- 平均会话时长（秒）
+FROM session_between_orders
+GROUP BY order_month, landing_page_type
+ORDER BY order_month, user_cnt DESC;
+
+
+
+
+
+
+--关于加购：是否有加购行为？ 加购最多的商品
+--关于用券：使用券的比例
+
+
+-- -------------看两单用户加购时间的商品数分布------（根据在购物车的商品做商品推荐优化，根据在购物车躺着的时间）
+-- WITH distributor_users AS (
+--     -- 分销商用户池（剔除）
+--     SELECT DISTINCT user_id
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND is_pro_ord = '1'
+--       AND current_level IN ('2', '3')
+-- ),
+
+-- user_monthly_orders AS (
+--     -- 用户订单序列
+--     SELECT 
+--         user_id,
+--         cn_pay_sucs_time,
+--         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY cn_pay_sucs_time) AS rn,
+--         COUNT(*) OVER (PARTITION BY user_id) AS total_orders
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2025-01-01'
+--       AND SUBSTR(cn_pay_sucs_time, 1, 10) < '2025-09-01'
+--       AND user_id NOT IN (SELECT user_id FROM distributor_users)
+-- ),
+
+-- first_second_order AS (
+--     -- 只要前两单
+--     SELECT  
+--         user_id,
+--         MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+--         MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+--     FROM user_monthly_orders
+--     WHERE total_orders >= 2
+--     GROUP BY user_id
+-- ),
+
+-- cart_records AS (
+--     -- 购物车加购记录
+--     SELECT 
+--         user_id,
+--         good_sn AS sku_code,
+--         SUBSTR(FROM_UNIXTIME(create_time), 1, 10) AS add2cart_day
+--     FROM ssvvods.s_vevor_cart_shopping_cart_df 
+--     WHERE ds = MAX_PT('ssvvods.s_vevor_cart_shopping_cart_df')
+-- ),
+
+
+-- cart_with_order_gap AS (
+--     -- 计算加购时间与首单的间隔
+--     SELECT 
+--         c.user_id,
+--         c.sku_code,
+--         DATEDIFF(f.second_order_time, c.add2cart_day) AS gap_to_second_order,
+--         DATEDIFF(c.add2cart_day, f.first_order_time) AS gap_from_first_order
+--     FROM cart_records c
+--     JOIN first_second_order f
+--       ON c.user_id = f.user_id
+--     WHERE c.add2cart_day >= SUBSTR(f.first_order_time,1,10)
+--       AND c.add2cart_day <= SUBSTR(f.second_order_time,1,10)
+-- )
+
+-- -- 统计分布（比如滞留天数 ≤ 99）
+-- SELECT 
+--     CASE WHEN gap_to_second_order <= 99 THEN gap_to_second_order ELSE 100 END AS day_bucket,
+--     COUNT(DISTINCT sku_code) AS sku_cnt,
+--     COUNT(DISTINCT user_id) AS usr_cnt
+-- FROM cart_with_order_gap
+-- GROUP BY CASE WHEN gap_to_second_order <= 99 THEN gap_to_second_order ELSE 100 END
+-- ORDER BY day_bucket;
+
+
+
+
+-- ----------------------第一单第二单中间加购的sku
+WITH distributor_users AS (
+    -- 分销商用户池（排除）
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    -- 每月用户订单 + 序号
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    -- 提取每月的第一单和第二单时间
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+),
+
+cart_records AS (
+    -- 购物车加购明细（含 SKU）
+    SELECT 
+        user_id,
+        good_sn AS sku_code,
+        FROM_UNIXTIME(create_time) AS add2cart_time,
+        SUBSTR(FROM_UNIXTIME(create_time), 1, 7) AS add2cart_month
+    FROM ssvvods.s_vevor_cart_shopping_cart_df 
+    WHERE ds = MAX_PT('ssvvods.s_vevor_cart_shopping_cart_df')
+      AND user_id IS NOT NULL
+      AND good_sn IS NOT NULL
+),
+
+cart_between_orders AS (
+    -- 两单之间的加购行为
+    SELECT 
+        c.user_id,
+        f.order_month,
+        c.sku_code,
+        c.add2cart_time,
+        DATEDIFF(c.add2cart_time, f.first_order_time) AS gap_from_first_order,
+        DATEDIFF(f.second_order_time, c.add2cart_time) AS gap_to_second_order
+    FROM first_second_order f
+    INNER JOIN cart_records c
+        ON f.user_id = c.user_id
+       AND c.add2cart_time > f.first_order_time
+       AND c.add2cart_time < f.second_order_time
+)
+
+-- 最终统计：每月 + SKU 的加购间隔分布
+SELECT
+    order_month,
+    sku_code,
+    COUNT(DISTINCT user_id) AS add2cart_users,
+    COUNT(*) AS add2cart_times,
+    ROUND(AVG(gap_from_first_order), 2) AS avg_days_from_first_order,
+    ROUND(AVG(gap_to_second_order), 2) AS avg_days_to_second_order,
+    MIN(gap_from_first_order) AS min_gap,
+    MAX(gap_to_second_order) AS max_gap
+FROM cart_between_orders
+GROUP BY order_month, sku_code
+ORDER BY order_month, add2cart_users DESC, add2cart_times DESC;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- 关于爆品：第一单爆品TOP10，买了第一单为爆品的，第二单买什么
+-- ----------------------第一单第二单中间加购的sku
+WITH distributor_users AS (
+    -- 分销商用户池（排除）
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    -- 每月用户订单 + 序号
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2025-07-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    -- 提取每月的第一单和第二单时间
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+),
+
+cart_records AS (
+    -- 购物车加购明细（含 SKU）
+    SELECT 
+        user_id,
+        good_sn AS sku_code,
+        FROM_UNIXTIME(create_time) AS add2cart_time,
+        SUBSTR(FROM_UNIXTIME(create_time), 1, 7) AS add2cart_month
+    FROM ssvvods.s_vevor_cart_shopping_cart_df 
+    WHERE ds = MAX_PT('ssvvods.s_vevor_cart_shopping_cart_df')
+      AND user_id IS NOT NULL
+      AND good_sn IS NOT NULL
+),
+
+cart_between_orders AS (
+    -- 两单之间的加购行为
+    SELECT 
+        c.user_id,
+        f.order_month,
+        c.sku_code,
+        c.add2cart_time,
+        DATEDIFF(c.add2cart_time, f.first_order_time) AS gap_from_first_order,
+        DATEDIFF(f.second_order_time, c.add2cart_time) AS gap_to_second_order
+    FROM first_second_order f
+    INNER JOIN cart_records c
+        ON f.user_id = c.user_id
+       AND c.add2cart_time > f.first_order_time
+       AND c.add2cart_time < f.second_order_time
+),
+
+sku_map AS (
+    -- SKU → SPU + 一级类目映射
+    SELECT DISTINCT
+        sku_code,
+        spu_code,
+        spu_name_cn,
+        dcate_lv1_name_en,
+        dcate_lv3_name_en
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+)
+
+-- 最终统计：每月 + SKU 的加购间隔分布 + SPU + 一级类目
+SELECT
+    cbo.order_month,
+    cbo.sku_code,
+    sm.spu_code,
+    sm.spu_name_cn,
+    sm.dcate_lv1_name_en,
+    sm.dcate_lv3_name_en,
+    COUNT(DISTINCT cbo.user_id) AS add2cart_users,
+    COUNT(*) AS add2cart_times,
+    ROUND(AVG(cbo.gap_from_first_order), 2) AS avg_days_from_first_order,
+    ROUND(AVG(cbo.gap_to_second_order), 2) AS avg_days_to_second_order,
+    MIN(cbo.gap_from_first_order) AS min_gap,
+    MAX(cbo.gap_to_second_order) AS max_gap
+FROM cart_between_orders cbo
+LEFT JOIN sku_map sm
+    ON cbo.sku_code = sm.sku_code
+GROUP BY cbo.order_month, cbo.sku_code, sm.spu_code, sm.spu_name_cn, sm.dcate_lv1_name_en,sm.dcate_lv3_name_en
+ORDER BY cbo.order_month, add2cart_users DESC, add2cart_times DESC;
+
+
+
+
+
+
+------------------【有加购行为的用户占比】
+WITH distributor_users AS (
+    -- 分销商用户池（排除）
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    -- 每月用户订单 + 序号
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    -- 提取每月的第一单和第二单时间
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+),
+
+cart_records AS (
+    -- 购物车加购明细（含 SKU）
+    SELECT 
+        user_id,
+        good_sn AS sku_code,
+        FROM_UNIXTIME(create_time) AS add2cart_time,
+        SUBSTR(FROM_UNIXTIME(create_time), 1, 7) AS add2cart_month
+    FROM ssvvods.s_vevor_cart_shopping_cart_df 
+    WHERE ds = MAX_PT('ssvvods.s_vevor_cart_shopping_cart_df')
+      AND user_id IS NOT NULL
+      AND good_sn IS NOT NULL
+),
+
+cart_between_orders AS (
+    -- 两单之间的加购行为
+    SELECT 
+        c.user_id,
+        f.order_month,
+        c.sku_code,
+        c.add2cart_time,
+        DATEDIFF(c.add2cart_time, f.first_order_time) AS gap_from_first_order,
+        DATEDIFF(f.second_order_time, c.add2cart_time) AS gap_to_second_order
+    FROM first_second_order f
+    INNER JOIN cart_records c
+        ON f.user_id = c.user_id
+       AND c.add2cart_time > f.first_order_time
+       AND c.add2cart_time < f.second_order_time
+),
+
+-- 每月复购用户数
+repurchase_users AS (
+    SELECT 
+        order_month,
+        COUNT(DISTINCT user_id) AS repurchase_user_cnt
+    FROM first_second_order
+    GROUP BY order_month
+),
+
+-- 每月复购中有加购的用户数
+repurchase_with_cart_users AS (
+    SELECT 
+        order_month,
+        COUNT(DISTINCT user_id) AS repurchase_with_cart_cnt
+    FROM cart_between_orders
+    GROUP BY order_month
+)
+
+-- 汇总：复购人数 + 其中加购人数 + 占比
+SELECT 
+    r.order_month,
+    r.repurchase_user_cnt,
+    COALESCE(c.repurchase_with_cart_cnt, 0) AS repurchase_with_cart_cnt,
+    ROUND(COALESCE(c.repurchase_with_cart_cnt, 0) / r.repurchase_user_cnt, 4) AS add2cart_user_pct
+FROM repurchase_users r
+LEFT JOIN repurchase_with_cart_users c
+    ON r.order_month = c.order_month
+ORDER BY r.order_month;
+
+
