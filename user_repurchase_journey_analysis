@@ -3,6 +3,239 @@
 
 ---------一单/复购时间纬度对比，
 
+-------------要计算每两单时间间隔在96天之内，平均每人浏览次数，平均商详浏览时长，平均会话时长
+-- WITH distributor_users AS (
+--     SELECT DISTINCT user_id
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND is_pro_ord = '1'
+--       AND current_level IN ('2', '3')
+-- ),
+
+-- user_monthly_orders AS (
+--     SELECT 
+--         user_id,
+--         cn_pay_sucs_time,
+--         SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+--         ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+--         COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+--     FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+--     WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+--       AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+--       AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+--       AND user_id NOT IN (SELECT user_id FROM distributor_users)
+-- ),
+
+-- first_second_order AS (
+--     SELECT  
+--         user_id,
+--         order_month,
+--         MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+--         MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+--     FROM user_monthly_orders
+--     WHERE monthly_order_count >= 2
+--     GROUP BY user_id, order_month
+-- ),
+
+-- raw_page_views AS (
+--     SELECT 
+--         usr_id AS user_id,
+--         sku_code,
+--         session_id,
+--         log_view_cn_time AS view_time
+--     FROM ssvvcdm.dwd_vevor_log_sku_view_di
+--     WHERE ds BETWEEN '20240501' AND '20250831'
+--       AND usr_id IS NOT NULL
+--       AND sku_code IS NOT NULL
+-- ),
+
+-- landing_page_type AS (
+--     SELECT 
+--         session_id,          
+--         usr_id AS user_id,
+--         landing_page_type,   -- 着陆页类型
+--         lst_page_type,       -- 退出页类型
+--         duration_time,       -- 会话停留时间（秒）
+--         pbd_duration_time    -- 商详停留时间（秒）
+--     FROM ssvvcdm.dwd_vevor_log_session_di
+--     WHERE ds BETWEEN '20240501' AND '20250831'
+--       AND usr_id IS NOT NULL
+-- ),
+
+-- -- 会话和订单时间窗口匹配
+-- session_between_orders AS (
+--     SELECT
+--         u.user_id,
+--         u.order_month,
+--         s.session_id,
+--         s.landing_page_type,
+--         s.lst_page_type,
+--         s.duration_time,
+--         s.pbd_duration_time
+--     FROM first_second_order u
+--     INNER JOIN raw_page_views r 
+--         ON u.user_id = r.user_id
+--        AND r.view_time > DATEADD(u.first_order_time, 1, 'dd')   -- 首单 +24h 之后
+--        AND r.view_time < u.second_order_time
+--     INNER JOIN landing_page_type s
+--         ON r.session_id = s.session_id
+--        AND r.user_id = s.user_id
+--     GROUP BY u.user_id, u.order_month, s.session_id, 
+--              s.landing_page_type, s.lst_page_type, s.duration_time, s.pbd_duration_time
+-- ),
+
+-- -- 用户维度的浏览次数
+-- user_browse_stats AS (
+--     SELECT
+--         u.order_month,
+--         u.user_id,
+--         COUNT(r.sku_code) AS total_views
+--     FROM first_second_order u
+--     INNER JOIN raw_page_views r
+--         ON u.user_id = r.user_id
+--        AND r.view_time > DATEADD(u.first_order_time, 1, 'dd')   -- 首单 +24h 之后
+--        AND r.view_time < u.second_order_time
+--     GROUP BY u.order_month, u.user_id
+-- )
+
+
+-- -- 最终输出
+-- SELECT
+--     u.order_month,
+--     COUNT(DISTINCT u.user_id) AS repurchase_users,
+--     ROUND(AVG(us.total_views), 2) AS 平均每人浏览次数,           -- 平均每人浏览次数
+--     ROUND(SUM(us.total_views) / COUNT(DISTINCT u.user_id), 2) AS avg_views_check,  -- 校验：总浏览/人
+--     ROUND(AVG(s.pbd_duration_time)/60, 2) AS 平均商详浏览时长_分钟,   -- 平均商详浏览时长
+--     ROUND(AVG(s.duration_time)/60, 2) AS 平均会话时长_分钟            -- 平均会话时长
+-- FROM first_second_order u
+-- LEFT JOIN user_browse_stats us
+--     ON u.user_id = us.user_id AND u.order_month = us.order_month
+-- LEFT JOIN session_between_orders s
+--     ON u.user_id = s.user_id AND u.order_month = s.order_month
+-- GROUP BY u.order_month
+-- ORDER BY u.order_month;
+
+
+
+
+
+
+
+---------------保证只计算 96 天内复购 用户
+WITH distributor_users AS (
+    SELECT DISTINCT user_id
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND is_pro_ord = '1'
+      AND current_level IN ('2', '3')
+),
+
+user_monthly_orders AS (
+    SELECT 
+        user_id,
+        cn_pay_sucs_time,
+        SUBSTR(cn_pay_sucs_time, 1, 7) AS order_month,
+        ROW_NUMBER() OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7) ORDER BY cn_pay_sucs_time) AS rn,
+        COUNT(*) OVER (PARTITION BY user_id, SUBSTR(cn_pay_sucs_time, 1, 7)) AS monthly_order_count
+    FROM ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+    WHERE ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+      AND SUBSTR(cn_pay_sucs_time, 1, 10) >= '2024-05-01'
+      AND SUBSTR(cn_pay_sucs_time, 1, 10)  < '2025-09-01'
+      AND user_id NOT IN (SELECT user_id FROM distributor_users)
+),
+
+first_second_order AS (
+    SELECT  
+        user_id,
+        order_month,
+        MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END) AS first_order_time,
+        MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END) AS second_order_time
+    FROM user_monthly_orders
+    WHERE monthly_order_count >= 2
+    GROUP BY user_id, order_month
+    HAVING DATEDIFF(MAX(CASE WHEN rn = 2 THEN cn_pay_sucs_time END),
+                    MAX(CASE WHEN rn = 1 THEN cn_pay_sucs_time END)) <= 96             ------------3个月
+),
+
+
+raw_page_views AS (
+    SELECT 
+        usr_id AS user_id,
+        sku_code,
+        session_id,
+        log_view_cn_time AS view_time
+    FROM ssvvcdm.dwd_vevor_log_sku_view_di
+    WHERE ds BETWEEN '20240501' AND '20250831'
+      AND usr_id IS NOT NULL
+      AND sku_code IS NOT NULL
+),
+
+landing_page_type AS (
+    SELECT 
+        session_id,          
+        usr_id AS user_id,
+        landing_page_type,   -- 着陆页类型
+        lst_page_type,       -- 退出页类型
+        duration_time,       -- 会话停留时间（秒）
+        pbd_duration_time    -- 商详停留时间（秒）
+    FROM ssvvcdm.dwd_vevor_log_session_di
+    WHERE ds BETWEEN '20240501' AND '20250831'
+      AND usr_id IS NOT NULL
+),
+
+-- 会话和订单时间窗口匹配
+session_between_orders AS (
+    SELECT
+        u.user_id,
+        u.order_month,
+        s.session_id,
+        s.landing_page_type,
+        s.lst_page_type,
+        s.duration_time,
+        s.pbd_duration_time
+    FROM first_second_order u
+    INNER JOIN raw_page_views r 
+        ON u.user_id = r.user_id
+       AND r.view_time > DATEADD(u.first_order_time, 1, 'dd')   -- 首单 +24h 之后
+       AND r.view_time < u.second_order_time
+    INNER JOIN landing_page_type s
+        ON r.session_id = s.session_id
+       AND r.user_id = s.user_id
+    GROUP BY u.user_id, u.order_month, s.session_id, 
+             s.landing_page_type, s.lst_page_type, s.duration_time, s.pbd_duration_time
+),
+
+-- 用户维度的浏览次数
+user_browse_stats AS (
+    SELECT
+        u.order_month,
+        u.user_id,
+        COUNT(r.sku_code) AS total_views
+    FROM first_second_order u
+    INNER JOIN raw_page_views r
+        ON u.user_id = r.user_id
+       AND r.view_time > DATEADD(u.first_order_time, 1, 'dd')   -- 首单 +24h 之后
+       AND r.view_time < u.second_order_time
+    GROUP BY u.order_month, u.user_id
+)
+
+
+-- 最终输出
+SELECT
+    u.order_month,
+    COUNT(DISTINCT u.user_id) AS repurchase_users,
+    ROUND(AVG(us.total_views), 2) AS 平均每人浏览次数,           -- 平均每人浏览次数
+    ROUND(SUM(us.total_views) / COUNT(DISTINCT u.user_id), 2) AS avg_views_check,  -- 校验：总浏览/人
+    ROUND(AVG(s.pbd_duration_time)/60, 2) AS 平均商详浏览时长_分钟,   -- 平均商详浏览时长
+    ROUND(AVG(s.duration_time)/60, 2) AS 平均会话时长_分钟            -- 平均会话时长
+FROM first_second_order u
+LEFT JOIN user_browse_stats us
+    ON u.user_id = us.user_id AND u.order_month = us.order_month
+LEFT JOIN session_between_orders s
+    ON u.user_id = s.user_id AND u.order_month = s.order_month
+GROUP BY u.order_month
+ORDER BY u.order_month;
+
 -----------多单用户BC纬度对比，
 
 WITH repurchase_users AS (
