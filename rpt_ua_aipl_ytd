@@ -1,0 +1,216 @@
+-- DROP TABLE IF EXISTS vevor_rpt_ua_aipl_ytd;
+
+-- CREATE TABLE IF NOT EXISTS vevor_rpt_ua_aipl_ytd
+-- (
+--     state_date                STRING comment '统计日期'
+--     ,state_year               STRING comment '统计年份'
+--     ,site_code                STRING comment '站点'
+--     ,reach_cnt_ytd            BIGINT comment '年累计可触达用户数'
+--     ,uv_ytd                   BIGINT comment '年累计uv'
+--     ,reg_cnt_ytd              BIGINT comment '年累计新注册用户数'
+--     ,sub_cnt_ytd              BIGINT comment '年累计订阅用户数'
+--     ,pay_cnt_ytd              BIGINT comment '年累计支付用户数'
+--     ,old_pay_cnt_ytd          BIGINT comment '年累计老支付用户数'
+--     ,repeat_buyers_ytd        BIGINT comment '年累计复购用户数'
+--     ,new_uv_conv_rate         DOUBLE comment '年累计新uv转化率'
+--     ,reg_conv_rate            DOUBLE comment '年累计注册转化率'
+--     ,old_buyer_conv_rate      DOUBLE comment '老买家转化率'
+--     ,buyer_repeat_rate        DOUBLE comment '用户复购率'
+--     ,return_buyer_retain_rate DOUBLE comment '老买家留存率'
+--     ,user_purchase_freq       DOUBLE comment '用户购买频次'
+-- )
+-- COMMENT '独立站用户分析-aipl分析-年累计'
+-- PARTITIONED BY (ds STRING COMMENT '分区')
+-- LIFECYCLE 732;
+-- ;
+-- ALTER TABLE vevor_rpt_ua_aipl_ytd ADD COLUMNS  (
+--     major_pro_gmv_cny_ytd DOUBLE COMMENT '年度大客户&Pro用户GMV',
+--     b_pro_gmv_cny_ytd  DOUBLE COMMENT '年度B端网络GMV'
+-- );
+-- set odps.stage.mapper.mem = 2048;  
+SET odps.sql.groupby.skewindata=true;
+INSERT OVERWRITE TABLE vevor_rpt_ua_aipl_ytd PARTITION(ds='${bizdate}')
+SELECT  /*+ mapjoin(trd, pro_gmv1, pro_gmv2) */ 
+        usr.state_date
+        ,usr.state_year
+        ,usr.site_code
+        ,usr.reach_cnt_ytd
+        ,uv.uv_ytd
+        ,usr.reg_cnt_ytd
+        ,usr.sub_cnt_ytd
+        ,usr.pay_cnt_ytd
+        ,usr.old_pay_cnt_ytd
+        ,usr.repeat_buyers_ytd
+        ,IF(uv.new_uv_ytd = 0,0,usr.new_pay_cnt_ytd / uv.new_uv_ytd) AS new_uv_conv_rate
+        ,IF(uv.uv_ytd = 0,0,usr.reg_cnt_ytd / uv.uv_ytd) AS reg_conv_rate
+        ,IF(uv.old_uv_ytd = 0,0,usr.old_pay_cnt_ytd / uv.old_uv_ytd) AS old_buyer_conv_rate
+        ,IF(usr.pay_cnt_ytd = 0,0,usr.repeat_buyers_ytd / usr.pay_cnt_ytd) AS buyer_repeat_rate
+        ,IF(usr.pre_year_buyers_ytd = 0,0,usr.old_buyer_cnt_ytd / usr.pre_year_buyers_ytd) AS return_buyer_retain_rate
+        ,IF(usr.pay_cnt_ytd = 0,0,trd.pay_ord_cnt_1y / usr.pay_cnt_ytd) AS user_purchase_freq     -----------购买频次
+        ,cast(major_pro_gmv_cny_ytd as double) as major_pro_gmv_cny_ytd
+        ,cast(b_pro_gmv_cny_ytd as double) as b_pro_gmv_cny_ytd
+FROM    (
+            SELECT  '${bizdate}' AS state_date
+                    ,SUBSTR('${bizdate}',1,4) AS state_year
+                    ,IF(GROUPING(site_code) = 1,'all',site_code) AS site_code
+                    ,COUNT(DISTINCT 
+                          CASE    WHEN ((reg_time_c n >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+                                      AND reg_time_cn <= TO_DATE('${bizdate}','yyyymmdd'))
+                                      OR (
+                                              lst_pay_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+                                                  AND lst_pay_time_cn <= TO_DATE('${bizdate}','yyyymmdd')
+                                  )) THEN user_id END
+                    ) AS reach_cnt_ytd --可触达数
+                    ,COUNT(DISTINCT 
+                          CASE    WHEN ((reg_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND reg_time_cn <= TO_DATE('${bizdate}','yyyymmdd'))) THEN user_id END
+                    ) AS reg_cnt_ytd --注册数
+                    ,COUNT(DISTINCT 
+                          CASE    WHEN lst_pay_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND lst_pay_time_cn <= TO_DATE('${bizdate}','yyyymmdd') THEN user_id END
+                    ) AS pay_cnt_ytd --支付用户数
+                    ,COUNT(DISTINCT 
+                         -- CASE    WHEN fst_pay_time_cn < TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') and lst_pay_time_cn >= to_date(to_char(dateadd(to_date('${bizdate}','yyyymmdd'),-1,'yyyy'),'yyyy0101'),'yyyymmdd') THEN user_id END
+                        CASE    WHEN is_lstyr_byr =1  THEN user_id END
+                    ) AS pre_year_buyers_ytd --去年买家数
+                    ,COUNT(DISTINCT 
+                          CASE    WHEN ((email_sub_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+                                      AND email_sub_time_cn <= TO_DATE('${bizdate}','yyyymmdd'))
+                                      OR (
+                                              sms_sub_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+                                                  AND sms_sub_time_cn <= TO_DATE('${bizdate}','yyyymmdd')
+                                  )
+                                      OR (
+                                              wa_sub_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+                                                  AND wa_sub_time_cn <= TO_DATE('${bizdate}','yyyymmdd')
+                                  )) THEN user_id END
+                    ) AS sub_cnt_ytd --订阅数
+                    ,COUNT(DISTINCT CASE    WHEN buyer_type = '老买家' THEN user_id END) AS old_pay_cnt_ytd --老买家数
+                    ,COUNT(DISTINCT CASE    WHEN buyer_type = '新买家' THEN user_id END) AS new_pay_cnt_ytd --新买家数
+                    ,COUNT(DISTINCT CASE    WHEN ytd_pay_ord_cnt >= 2 THEN user_id END) AS repeat_buyers_ytd --复购买家数
+                    ,COUNT(DISTINCT CASE    WHEN buyer_type = '老买家' and lst_pay_time_cn >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND lst_pay_time_cn <= TO_DATE('${bizdate}','yyyymmdd')     THEN user_id END) AS old_buyer_cnt_ytd --老买家年内购买的买家数
+            FROM    (
+                        SELECT  a.user_id
+                                ,a.reg_site_code AS site_code
+                                ,a.reg_time_cn
+                                ,c.buyer_type
+                                ,b.fst_pay_time_cn
+                                ,b.lst_pay_time_cn --  ,b.lst_sub_notice_time_cn
+                                ,a.email_sub_time_cn
+                                ,a.sms_sub_time_cn
+                                ,wa_sub_time_cn
+                                ,b.ytd_pay_ord_cnt
+                                ,b.is_lstyr_byr
+                        FROM    ssvvcdm.dim_vevor_usr_member a
+                        LEFT JOIN ssvvcdm.dim_vevor_usr_offline_label_of_trd_log b
+                        ON      a.user_id = b.user_id
+                        AND     b.ds = MAX_PT('ssvvcdm.dim_vevor_usr_offline_label_of_trd_log')
+                        LEFT JOIN   (
+                                        SELECT  user_id
+                                                ,MAX(label_value) AS buyer_type
+                                        FROM    ssvvcdm.dim_vevor_usr_offline_label
+                                        WHERE   label_code = 'byr_type'
+                                        AND     ds = MAX_PT('ssvvcdm.dim_vevor_usr_offline_label')
+                                        GROUP BY user_id
+                                    ) c
+                        ON      a.user_id = c.user_id
+                        WHERE   a.ds = MAX_PT('ssvvcdm.dim_vevor_usr_member')
+                    ) 
+            GROUP BY 
+            GROUPING SETS (()
+                          ,(site_code))
+        ) usr
+LEFT JOIN   (
+                SELECT  SUBSTR('${bizdate}',1,4) AS state_year
+                        ,IF(GROUPING(site_code) = 1,'all',site_code) AS site_code
+                        ,COUNT(DISTINCT 
+                              CASE    WHEN ((lst_visit_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND lst_visit_time <= TO_DATE('${bizdate}','yyyymmdd'))) THEN cookie_id END
+                        ) AS uv_ytd
+                        ,COUNT(DISTINCT 
+                              CASE    WHEN ((fst_visit_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND fst_visit_time <= TO_DATE('${bizdate}','yyyymmdd'))) THEN cookie_id END
+                        ) AS new_uv_ytd
+                        ,COUNT(DISTINCT 
+                              CASE    WHEN fst_visit_time < TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') THEN cookie_id END
+                        ) AS old_uv_ytd
+                FROM    (
+                            SELECT  cookie_id
+                                    ,fst_visit_time
+                                    ,lst_visit_time
+                                    ,fst_site_code AS site_code
+                            FROM    ssvvcdm.dim_vevor_log_cookie_df
+                            WHERE   ds = max_pt("ssvvcdm.dim_vevor_log_cookie_df") 
+                            -- and (lst_visit_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND lst_visit_time <= TO_DATE('${bizdate}','yyyymmdd') 
+                            --     or fst_visit_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd') AND fst_visit_time <= TO_DATE('${bizdate}','yyyymmdd') 
+                            -- )
+                        ) t
+                GROUP BY 
+                GROUPING SETS (()
+                              ,(site_code))
+            ) uv
+ON      usr.state_year = uv.state_year
+AND     usr.site_code = uv.site_code
+LEFT JOIN   (
+                SELECT  SUBSTR('${bizdate}',1,4) AS state_year
+                        ,CASE   WHEN id = 'all' THEN 'all'
+                                ELSE site_code
+                        END AS site_code
+                        ,pay_ord_cnt_1y
+                FROM    ssvvcdm.dws_vevor_trd_pay_ytd_c
+                WHERE   ds = '${bizdate}'
+                AND     id IN ('all','site_code')
+            ) trd
+ON      usr.state_year = trd.state_year
+AND     usr.site_code = trd.site_code
+
+
+left join (
+SELECT  SUBSTR('${bizdate}',1,4) AS state_year
+        ,IF(GROUPING(site_code) = 1,'all',site_code) AS site_code
+        ,SUM(ord_gmv_cny_amt) AS major_pro_gmv_cny_ytd
+FROM    ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+WHERE   ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+AND     cn_pay_sucs_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+AND     cn_pay_sucs_time <= dateadd(TO_DATE('${bizdate}','yyyymmdd'),1,'dd')
+AND     reg_email NOT IN ('allenfirst2021@hotmail.com','417157916@qq.com','tevedin@outlook.com','codybrons@gmail.com','zemletes@outlook.com','thesale640@gmail.com','operations@roatanfantasy.com','gsmdoki@gmail.com')
+AND     is_pro_ord = '1'
+AND     ord_pay_status = '3'
+AND     order_type = '0' ----------线上商城
+GROUP BY GROUPING SETS (()
+                       ,(site_code))
+) pro_gmv1
+ON      usr.state_year = pro_gmv1.state_year
+AND     usr.site_code = pro_gmv1.site_code 
+
+
+left join (
+
+SELECT  SUBSTR('${bizdate}',1,4) AS state_year
+        ,IF(GROUPING(site_code) = 1,'all',site_code) AS site_code
+        ,SUM(ord_gmv_cny_amt) AS b_pro_gmv_cny_ytd
+FROM    ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
+WHERE   ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
+AND     cn_pay_sucs_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
+AND     cn_pay_sucs_time <= dateadd(TO_DATE('${bizdate}','yyyymmdd'),1,'dd')
+AND     is_pro_ord = '1'
+AND     (
+            (
+                        ord_pay_status IN ('1','3')
+                        AND     reg_email IN (-------------)
+            ) --线下分销商
+            OR      (
+                        ord_status IN ('0','6')
+                        AND     order_type = '4'
+            ) --分销平台
+            OR      (
+                        ord_pay_status = '3'
+                        AND     reg_email IN ('-','-','-')
+            ) --线上分销商
+            OR      (
+                        ord_pay_status = '3'
+                        AND     order_type IN ('3','7')
+                        AND     reg_email NOT IN ('codybrons@gmail.com','zemletes@outlook.com','thesale640@gmail.com','operations@roatanfantasy.com','gsmdoki@gmail.com') --线上分销商
+            )
+)
+GROUP BY GROUPING SETS (()
+                       ,(site_code))
+) pro_gmv2
+ON      usr.state_year = pro_gmv2.state_year
+AND     usr.site_code = pro_gmv2.site_code   
