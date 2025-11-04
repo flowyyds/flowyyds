@@ -169,7 +169,7 @@ FROM    ssvvcdm.dwd_vevor_trd_ord_sku_detail_df
 WHERE   ds = MAX_PT('ssvvcdm.dwd_vevor_trd_ord_sku_detail_df')
 AND     cn_pay_sucs_time >= TO_DATE(CONCAT(SUBSTR('${bizdate}',1,4),'0101'),'yyyymmdd')
 AND     cn_pay_sucs_time <= dateadd(TO_DATE('${bizdate}','yyyymmdd'),1,'dd')
-AND     reg_email NOT IN ('allenfirst2021@hotmail.com','417157916@qq.com','tevedin@outlook.com','codybrons@gmail.com','zemletes@outlook.com','thesale640@gmail.com','operations@roatanfantasy.com','gsmdoki@gmail.com')
+AND     reg_email NOT IN (')
 AND     is_pro_ord = '1'
 AND     ord_pay_status = '3'
 AND     order_type = '0' ----------线上商城
@@ -206,7 +206,7 @@ AND     (
             OR      (
                         ord_pay_status = '3'
                         AND     order_type IN ('3','7')
-                        AND     reg_email NOT IN ('codybrons@gmail.com','zemletes@outlook.com','thesale640@gmail.com','operations@roatanfantasy.com','gsmdoki@gmail.com') --线上分销商
+                        AND     reg_email NOT IN (') --线上分销商
             )
 )
 GROUP BY GROUPING SETS (()
