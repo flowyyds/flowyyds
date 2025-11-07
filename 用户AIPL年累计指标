@@ -1,0 +1,101 @@
+
+WITH base AS (
+  SELECT
+    state_date,
+    state_year,
+    site_code,
+    reach_cnt_ytd,
+    uv_ytd,
+    reg_cnt_ytd,
+    sub_cnt_ytd,
+    pay_cnt_ytd,
+    old_pay_cnt_ytd,
+    repeat_buyers_ytd,
+    new_uv_conv_rate,
+    reg_conv_rate,
+    old_buyer_conv_rate,
+    buyer_repeat_rate,
+    return_buyer_retain_rate,
+    user_purchase_freq
+  FROM ssvvads.vevor_rpt_ua_aipl_ytd
+  WHERE ds = '${start_date}'
+),
+
+last_month AS (
+  SELECT
+    site_code,
+    reach_cnt_ytd       AS reach_cnt_ytd_lm,
+    uv_ytd              AS uv_ytd_lm,
+    reg_cnt_ytd         AS reg_cnt_ytd_lm,
+    sub_cnt_ytd         AS sub_cnt_ytd_lm,
+    pay_cnt_ytd         AS pay_cnt_ytd_lm,
+    old_pay_cnt_ytd     AS old_pay_cnt_ytd_lm,
+    repeat_buyers_ytd   AS repeat_buyers_ytd_lm,
+    new_uv_conv_rate    AS new_uv_conv_rate_lm,
+    reg_conv_rate       AS reg_conv_rate_lm,
+    old_buyer_conv_rate AS old_buyer_conv_rate_lm,
+    buyer_repeat_rate   AS buyer_repeat_rate_lm,
+    return_buyer_retain_rate AS return_buyer_retain_rate_lm,
+    user_purchase_freq  AS user_purchase_freq_lm
+  FROM ssvvads.vevor_rpt_ua_aipl_ytd
+  WHERE ds = to_char(dateadd(to_date('${start_date}','yyyymmdd'),-1,'mm'),'yyyymmdd')
+),
+
+last_year AS (
+  SELECT
+    site_code,
+    reach_cnt_ytd       AS reach_cnt_ytd_ly,
+    uv_ytd              AS uv_ytd_ly,
+    reg_cnt_ytd         AS reg_cnt_ytd_ly,
+    sub_cnt_ytd         AS sub_cnt_ytd_ly,
+    pay_cnt_ytd         AS pay_cnt_ytd_ly,
+    old_pay_cnt_ytd     AS old_pay_cnt_ytd_ly,
+    repeat_buyers_ytd   AS repeat_buyers_ytd_ly,
+    new_uv_conv_rate    AS new_uv_conv_rate_ly,
+    reg_conv_rate       AS reg_conv_rate_ly,
+    old_buyer_conv_rate AS old_buyer_conv_rate_ly,
+    buyer_repeat_rate   AS buyer_repeat_rate_ly,
+    return_buyer_retain_rate AS return_buyer_retain_rate_ly,
+    user_purchase_freq  AS user_purchase_freq_ly
+  FROM ssvvads.vevor_rpt_ua_aipl_ytd
+  WHERE ds = to_char(dateadd(to_date('${start_date}','yyyymmdd'),-1,'yyyy'),'yyyymmdd')
+)
+
+SELECT
+  base.*,
+
+  -- 月环比（MoM）
+  (base.reach_cnt_ytd - lm.reach_cnt_ytd_lm) / NULLIF(lm.reach_cnt_ytd_lm, 0) AS reach_cnt_mom,
+  (base.uv_ytd - lm.uv_ytd_lm) / NULLIF(lm.uv_ytd_lm, 0) AS uv_mom,
+  (base.reg_cnt_ytd - lm.reg_cnt_ytd_lm) / NULLIF(lm.reg_cnt_ytd_lm, 0) AS reg_cnt_mom,
+  (base.sub_cnt_ytd - lm.sub_cnt_ytd_lm) / NULLIF(lm.sub_cnt_ytd_lm, 0) AS sub_cnt_mom,
+  (base.pay_cnt_ytd - lm.pay_cnt_ytd_lm) / NULLIF(lm.pay_cnt_ytd_lm, 0) AS pay_cnt_mom,
+  (base.old_pay_cnt_ytd - lm.old_pay_cnt_ytd_lm) / NULLIF(lm.old_pay_cnt_ytd_lm, 0) AS old_pay_cnt_mom,
+  (base.repeat_buyers_ytd - lm.repeat_buyers_ytd_lm) / NULLIF(lm.repeat_buyers_ytd_lm, 0) AS repeat_buyers_mom,
+  (base.new_uv_conv_rate - lm.new_uv_conv_rate_lm) / NULLIF(lm.new_uv_conv_rate_lm, 0) AS new_uv_conv_rate_mom,
+  (base.reg_conv_rate - lm.reg_conv_rate_lm) / NULLIF(lm.reg_conv_rate_lm, 0) AS reg_conv_rate_mom,
+  (base.old_buyer_conv_rate - lm.old_buyer_conv_rate_lm) / NULLIF(lm.old_buyer_conv_rate_lm, 0) AS old_buyer_conv_rate_mom,
+  (base.buyer_repeat_rate - lm.buyer_repeat_rate_lm) / NULLIF(lm.buyer_repeat_rate_lm, 0) AS buyer_repeat_rate_mom,
+  (base.return_buyer_retain_rate - lm.return_buyer_retain_rate_lm) / NULLIF(lm.return_buyer_retain_rate_lm, 0) AS return_buyer_retain_rate_mom,
+  (base.user_purchase_freq - lm.user_purchase_freq_lm) / NULLIF(lm.user_purchase_freq_lm, 0) AS user_purchase_freq_mom,
+
+  -- 年同比（YoY）
+  (base.reach_cnt_ytd - ly.reach_cnt_ytd_ly) / NULLIF(ly.reach_cnt_ytd_ly, 0) AS reach_cnt_yoy,
+  (base.uv_ytd - ly.uv_ytd_ly) / NULLIF(ly.uv_ytd_ly, 0) AS uv_yoy,
+  (base.reg_cnt_ytd - ly.reg_cnt_ytd_ly) / NULLIF(ly.reg_cnt_ytd_ly, 0) AS reg_cnt_yoy,
+  (base.sub_cnt_ytd - ly.sub_cnt_ytd_ly) / NULLIF(ly.sub_cnt_ytd_ly, 0) AS sub_cnt_yoy,
+  (base.pay_cnt_ytd - ly.pay_cnt_ytd_ly) / NULLIF(ly.pay_cnt_ytd_ly, 0) AS pay_cnt_yoy,
+  (base.old_pay_cnt_ytd - ly.old_pay_cnt_ytd_ly) / NULLIF(ly.old_pay_cnt_ytd_ly, 0) AS old_pay_cnt_yoy,
+  (base.repeat_buyers_ytd - ly.repeat_buyers_ytd_ly) / NULLIF(ly.repeat_buyers_ytd_ly, 0) AS repeat_buyers_yoy,
+  (base.new_uv_conv_rate - ly.new_uv_conv_rate_ly) / NULLIF(ly.new_uv_conv_rate_ly, 0) AS new_uv_conv_rate_yoy,
+  (base.reg_conv_rate - ly.reg_conv_rate_ly) / NULLIF(ly.reg_conv_rate_ly, 0) AS reg_conv_rate_yoy,
+  (base.old_buyer_conv_rate - ly.old_buyer_conv_rate_ly) / NULLIF(ly.old_buyer_conv_rate_ly, 0) AS old_buyer_conv_rate_yoy,
+  (base.buyer_repeat_rate - ly.buyer_repeat_rate_ly) / NULLIF(ly.buyer_repeat_rate_ly, 0) AS buyer_repeat_rate_yoy,
+  (base.return_buyer_retain_rate - ly.return_buyer_retain_rate_ly) / NULLIF(ly.return_buyer_retain_rate_ly, 0) AS return_buyer_retain_rate_yoy,
+  (base.user_purchase_freq - ly.user_purchase_freq_ly) / NULLIF(ly.user_purchase_freq_ly, 0) AS user_purchase_freq_yoy
+
+FROM base
+LEFT JOIN last_month lm ON base.site_code = lm.site_code
+LEFT JOIN last_year ly ON base.site_code = ly.site_code
+
+
